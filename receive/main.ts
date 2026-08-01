@@ -175,10 +175,16 @@ function finish(payload: Uint8Array, hashOk: boolean, seconds: number, totalLen:
   const heading = document.createElement("div");
   heading.className = "done";
   heading.textContent = "Transfer Complete!";
+  const url = URL.createObjectURL(new Blob([payload as BlobPart]));
   const img = document.createElement("img");
   img.className = "received";
-  img.src = URL.createObjectURL(new Blob([payload as BlobPart], { type: "image/png" }));
-  result.append(heading, img);
+  img.onerror = () => img.remove(); // not an image — the download link still works
+  img.src = url;
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "received.bin"; // the protocol doesn't carry a filename
+  link.textContent = `Download file (${kb} KB)`;
+  result.append(heading, img, link);
 }
 
 function updateStats() {

@@ -8,17 +8,12 @@
   </head>
   <body>
     <h1>DECIMEN <small>— Fountain QR File Transfer</small></h1>
-    <div class="hint" id="specs">loading payload…</div>
+    <div class="hint" id="specs">choose a file to start streaming</div>
+    <input id="cfg-file" type="file" style="display: none" />
+    <button id="pick-btn" type="button">Choose file</button>
     <details class="settings">
       <summary>Settings</summary>
       <div class="row">
-        <label>
-          payload
-          <select id="cfg-payload">
-            <option value="../success.png" selected>512 KB image</option>
-            <option value="../success-2mb.png">2 MB image</option>
-          </select>
-        </label>
         <label>
           tx fps
           <select id="cfg-fps">
