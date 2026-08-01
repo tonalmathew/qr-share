@@ -14,7 +14,7 @@
 
 import QRCode from "qrcode";
 import { LTEncoder } from "../shared/fountain";
-import { HEADER_LEN, fnv1a, packFrame, type FrameHeader } from "../shared/protocol";
+import { HEADER_LEN, fnv1a, packFrame, wrapPayload, type FrameHeader } from "../shared/protocol";
 
 const MARGIN = 4; // quiet-zone modules
 const LOOKAHEAD = 3;
@@ -23,6 +23,7 @@ const canvas = document.getElementById("qr") as HTMLCanvasElement;
 const specs = document.getElementById("specs")!;
 const cfgFile = document.getElementById("cfg-file") as HTMLInputElement;
 const pickBtn = document.getElementById("pick-btn") as HTMLButtonElement;
+const startBtn = document.getElementById("start-btn") as HTMLButtonElement;
 const cfgFps = document.getElementById("cfg-fps") as HTMLSelectElement;
 const cfgBytes = document.getElementById("cfg-bytes") as HTMLSelectElement;
 const cfgEcc = document.getElementById("cfg-ecc") as HTMLSelectElement;
@@ -30,7 +31,15 @@ const cfgSize = document.getElementById("cfg-size") as HTMLInputElement;
 
 let filePayload: Uint8Array | null = null;
 let payloadName = "";
+let streaming = false; // becomes true on "Start sharing"
 let generation = 0; // bumped on every restart; stale loops see it and die
+
+function clearCanvas() {
+  canvas.width = 16;
+  canvas.height = 16;
+  canvas.style.width = "";
+  canvas.style.height = "";
+}
 
 async function main() {
   pickBtn.addEventListener("click", () => cfgFile.click());
@@ -38,16 +47,26 @@ async function main() {
     const file = cfgFile.files?.[0];
     if (!file) return;
     const gen = ++generation; // invalidate any running stream while we read
+    streaming = false;
     specs.textContent = `reading ${file.name}…`;
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (gen !== generation) return; // superseded by another pick
-    filePayload = bytes;
+    filePayload = wrapPayload(file.name, bytes);
     payloadName = file.name;
     pickBtn.textContent = "Change file";
+    startBtn.style.display = "";
+    clearCanvas();
+    specs.textContent = `${file.name} · ${Math.round(bytes.length / 1024)} KB — ready to share`;
+  });
+  startBtn.addEventListener("click", () => {
+    startBtn.style.display = "none";
+    streaming = true;
     void startStream();
   });
   for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize]) {
-    el.addEventListener("change", () => void startStream());
+    el.addEventListener("change", () => {
+      if (streaming) void startStream();
+    });
   }
   try {
     await (navigator as Navigator & { wakeLock?: { request(t: "screen"): Promise<unknown> } })

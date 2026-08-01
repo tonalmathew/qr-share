@@ -9,7 +9,7 @@
 //   4  u32  seq         drives the fountain PRNG (see fountain.ts)
 //   8  u16  k           source block count
 //  10  u16  blockLen    payload bytes per frame
-//  12  u32  totalLen    file length in bytes
+//  12  u32  totalLen    payload length in bytes (filename envelope + file)
 //  16  u32  payloadFnv  FNV-1a of the whole file — verified on completion
 
 export const HEADER_LEN = 20;
@@ -57,6 +57,34 @@ export function parseFrame(
   if (header.k === 0 || header.blockLen === 0 || header.totalLen === 0) return null;
   if (bytes.length !== HEADER_LEN + header.blockLen) return null;
   return { header, block: bytes.subarray(HEADER_LEN) };
+}
+
+// Payload envelope: the fountain-coded payload carries the filename alongside
+// the content, keeping the per-frame header fixed-size. Layout:
+//   0  u16  nameLen (little-endian, UTF-8 byte count, ≤ 255)
+//   2  ...  name bytes, then the file content
+const NAME_MAX = 255;
+
+export function wrapPayload(name: string, file: Uint8Array): Uint8Array {
+  let nameBytes = new TextEncoder().encode(name);
+  if (nameBytes.length > NAME_MAX) nameBytes = nameBytes.subarray(0, NAME_MAX);
+  const out = new Uint8Array(2 + nameBytes.length + file.length);
+  new DataView(out.buffer).setUint16(0, nameBytes.length, true);
+  out.set(nameBytes, 2);
+  out.set(file, 2 + nameBytes.length);
+  return out;
+}
+
+export function unwrapPayload(
+  payload: Uint8Array,
+): { name: string; file: Uint8Array } | null {
+  if (payload.length < 2) return null;
+  const nameLen = new DataView(payload.buffer, payload.byteOffset).getUint16(0, true);
+  if (nameLen > NAME_MAX || 2 + nameLen > payload.length) return null;
+  return {
+    name: new TextDecoder().decode(payload.subarray(2, 2 + nameLen)),
+    file: payload.subarray(2 + nameLen),
+  };
 }
 
 export function fnv1a(bytes: Uint8Array): number {

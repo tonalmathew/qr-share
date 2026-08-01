@@ -9,7 +9,7 @@
 //   cascade, so blocks-solved looks stalled and then teleports to done.
 
 import { LTDecoder } from "../shared/fountain";
-import { fnv1a, parseFrame } from "../shared/protocol";
+import { fnv1a, parseFrame, unwrapPayload } from "../shared/protocol";
 
 const OVERHEAD_EST = 1.18; // expected frames ≈ K × this (robust-soliton ε)
 
@@ -175,15 +175,18 @@ function finish(payload: Uint8Array, hashOk: boolean, seconds: number, totalLen:
   const heading = document.createElement("div");
   heading.className = "done";
   heading.textContent = "Transfer Complete!";
-  const url = URL.createObjectURL(new Blob([payload as BlobPart]));
+  const unwrapped = unwrapPayload(payload);
+  const name = unwrapped?.name || "received.bin"; // pre-envelope senders
+  const file = unwrapped ? unwrapped.file : payload;
+  const url = URL.createObjectURL(new Blob([file as BlobPart]));
   const img = document.createElement("img");
   img.className = "received";
   img.onerror = () => img.remove(); // not an image — the download link still works
   img.src = url;
   const link = document.createElement("a");
   link.href = url;
-  link.download = "received.bin"; // the protocol doesn't carry a filename
-  link.textContent = `Download file (${kb} KB)`;
+  link.download = name;
+  link.textContent = `Download ${name} (${Math.round(file.length / 1024)} KB)`;
   result.append(heading, img, link);
 }
 
