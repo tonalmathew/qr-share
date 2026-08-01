@@ -24,6 +24,7 @@ const specs = document.getElementById("specs")!;
 const cfgFile = document.getElementById("cfg-file") as HTMLInputElement;
 const pickBtn = document.getElementById("pick-btn") as HTMLButtonElement;
 const startBtn = document.getElementById("start-btn") as HTMLButtonElement;
+const cfgTiles = document.getElementById("cfg-tiles") as HTMLSelectElement;
 const cfgFps = document.getElementById("cfg-fps") as HTMLSelectElement;
 const cfgBytes = document.getElementById("cfg-bytes") as HTMLSelectElement;
 const cfgEcc = document.getElementById("cfg-ecc") as HTMLSelectElement;
@@ -70,7 +71,7 @@ async function main() {
     streaming = true;
     void startStream();
   });
-  for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize]) {
+  for (const el of [cfgTiles, cfgFps, cfgBytes, cfgEcc, cfgSize]) {
     el.addEventListener("change", () => {
       if (streaming) void startStream();
     });
@@ -87,6 +88,7 @@ async function startStream() {
   const payload = filePayload;
   if (!payload) return; // nothing picked yet
   const gen = ++generation;
+  const grid = Number(cfgTiles.value); // grid×grid QR tiles per displayed frame
   const txFps = Number(cfgFps.value);
   const frameBytes = Number(cfgBytes.value);
   const ecc = cfgEcc.value as "L" | "M" | "Q" | "H";
@@ -121,9 +123,13 @@ async function startStream() {
   const queue: ImageData[] = [];
   let nextSeq = 0;
 
+  // Each tile lives in a (modules + 2·MARGIN) cell: MARGIN of quiet zone on
+  // every side, so neighboring tiles are separated by 2·MARGIN of white.
+  const totalModules = () => grid * (modules + 2 * MARGIN);
+
   const sizeCanvas = () => {
     const dpr = window.devicePixelRatio || 1;
-    const total = modules + 2 * MARGIN;
+    const total = totalModules();
     const cssBudget = Math.min(0.9 * Math.min(window.innerWidth, window.innerHeight), displayPx);
     scale = Math.max(1, Math.floor((cssBudget * dpr) / total));
     staging.width = total;
@@ -134,7 +140,7 @@ async function startStream() {
     canvas.style.height = `${(total * scale) / dpr}px`;
   };
 
-  const makeFrame = (): ImageData => {
+  const makeQr = () => {
     const bytes = packFrame({ ...header, seq: nextSeq }, encoder.encode(nextSeq));
     nextSeq++;
     const qr = QRCode.create([{ data: bytes, mode: "byte" } as unknown as QRCode.QRCodeSegment], {
@@ -146,23 +152,34 @@ async function startStream() {
       version = qr.version;
       modules = qr.modules.size;
       sizeCanvas();
-      const etaSec = (encoder.k * 1.18) / txFps; // ≈ frames needed / tx rate
+      const etaSec = (encoder.k * 1.18) / (txFps * grid * grid); // ≈ frames needed / tx rate
       const eta = etaSec >= 90 ? `~${Math.ceil(etaSec / 60)} min` : `~${Math.ceil(etaSec)} s`;
       specs.textContent =
-        `${payloadName} · ${txFps} FPS · ${frameBytes} bytes per frame · V${version} · ECC ${ecc} · ` +
-        `${Math.round(payload.length / 1024)} KB payload · K=${encoder.k} · ${eta} best case`;
+        `${payloadName} · ${grid}×${grid} tiles · ${txFps} FPS · ${frameBytes} bytes per frame · ` +
+        `V${version} · ECC ${ecc} · ${Math.round(payload.length / 1024)} KB payload · ` +
+        `K=${encoder.k} · ${eta} best case`;
     }
-    const size = qr.modules.size;
-    const data = qr.modules.data;
-    const total = size + 2 * MARGIN;
+    return qr;
+  };
+
+  const makeFrame = (): ImageData => {
+    // grid² independent fountain frames composed into one displayed image
+    const codes = Array.from({ length: grid * grid }, makeQr);
+    const cell = modules + 2 * MARGIN;
+    const total = totalModules();
     const img = new ImageData(total, total);
     const px = new Uint32Array(img.data.buffer);
     px.fill(0xffffffff);
-    for (let y = 0; y < size; y++) {
-      const row = (y + MARGIN) * total + MARGIN;
-      const src = y * size;
-      for (let x = 0; x < size; x++) {
-        if (data[src + x]) px[row + x] = 0xff000000;
+    for (let t = 0; t < codes.length; t++) {
+      const data = codes[t]!.modules.data;
+      const ox = (t % grid) * cell + MARGIN;
+      const oy = Math.floor(t / grid) * cell + MARGIN;
+      for (let y = 0; y < modules; y++) {
+        const row = (y + oy) * total + ox;
+        const src = y * modules;
+        for (let x = 0; x < modules; x++) {
+          if (data[src + x]) px[row + x] = 0xff000000;
+        }
       }
     }
     return img;

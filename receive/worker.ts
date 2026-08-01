@@ -22,15 +22,16 @@ ctx.onmessage = async (e: MessageEvent) => {
   const { id, buf, w, h } = e.data as { id: number; buf: ArrayBuffer; w: number; h: number };
   try {
     const img = new ImageData(new Uint8ClampedArray(buf), w, h);
-    const results = await readBarcodes(img, { formats: ["QRCode"], maxNumberOfSymbols: 1 });
-    const r = results.find((x) => x.isValid && x.bytes.length > 0);
-    ctx.postMessage({ id, bytes: r ? r.bytes : null });
+    // the sender may tile up to 3×3 codes into one displayed frame
+    const results = await readBarcodes(img, { formats: ["QRCode"], maxNumberOfSymbols: 9 });
+    const frames = results.filter((x) => x.isValid && x.bytes.length > 0).map((x) => x.bytes);
+    ctx.postMessage({ id, frames });
   } catch {
-    ctx.postMessage({ id, bytes: null });
+    ctx.postMessage({ id, frames: [] });
   }
 };
 
 // warm the WASM so the first real frame doesn't pay instantiation
 void readBarcodes(new ImageData(8, 8), { formats: ["QRCode"] })
   .catch(() => undefined)
-  .then(() => ctx.postMessage({ id: -1, bytes: null }));
+  .then(() => ctx.postMessage({ id: -1, frames: [] }));
