@@ -48,8 +48,15 @@ async function main() {
     if (!file) return;
     const gen = ++generation; // invalidate any running stream while we read
     streaming = false;
+    startBtn.style.display = "none";
     specs.textContent = `reading ${file.name}…`;
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } catch {
+      specs.textContent = `✗ couldn't read ${file.name} — likely too large to load into memory`;
+      return;
+    }
     if (gen !== generation) return; // superseded by another pick
     filePayload = wrapPayload(file.name, bytes);
     payloadName = file.name;
@@ -87,6 +94,16 @@ async function startStream() {
 
   const sessionId = (Math.floor(Math.random() * 0xffff) + 1) & 0xffff;
   const blockLen = frameBytes - HEADER_LEN;
+  const maxLen = 0xffff * blockLen; // k is a u16 in the frame header
+  if (payload.length > maxLen) {
+    streaming = false;
+    startBtn.style.display = "";
+    specs.textContent =
+      `✗ ${payloadName} is ${Math.round(payload.length / 1024 / 1024)} MB — ` +
+      `max ${Math.floor(maxLen / 1024 / 1024)} MB at ${frameBytes} bytes/frame. ` +
+      `QR is a slow optical channel; large videos aren't practical.`;
+    return;
+  }
   const encoder = new LTEncoder(payload, blockLen, sessionId);
   const header: FrameHeader = {
     sessionId,
@@ -129,9 +146,11 @@ async function startStream() {
       version = qr.version;
       modules = qr.modules.size;
       sizeCanvas();
+      const etaSec = (encoder.k * 1.18) / txFps; // ≈ frames needed / tx rate
+      const eta = etaSec >= 90 ? `~${Math.ceil(etaSec / 60)} min` : `~${Math.ceil(etaSec)} s`;
       specs.textContent =
         `${payloadName} · ${txFps} FPS · ${frameBytes} bytes per frame · V${version} · ECC ${ecc} · ` +
-        `${Math.round(payload.length / 1024)} KB payload · K=${encoder.k}`;
+        `${Math.round(payload.length / 1024)} KB payload · K=${encoder.k} · ${eta} best case`;
     }
     const size = qr.modules.size;
     const data = qr.modules.data;
