@@ -21,30 +21,34 @@ const LOOKAHEAD = 3;
 
 const canvas = document.getElementById("qr") as HTMLCanvasElement;
 const specs = document.getElementById("specs")!;
-const cfgPayload = document.getElementById("cfg-payload") as HTMLSelectElement;
+const cfgFile = document.getElementById("cfg-file") as HTMLInputElement;
+const pickBtn = document.getElementById("pick-btn") as HTMLButtonElement;
 const cfgFps = document.getElementById("cfg-fps") as HTMLSelectElement;
 const cfgBytes = document.getElementById("cfg-bytes") as HTMLSelectElement;
 const cfgEcc = document.getElementById("cfg-ecc") as HTMLSelectElement;
 const cfgSize = document.getElementById("cfg-size") as HTMLInputElement;
 
-const payloadCache = new Map<string, Uint8Array>();
+let filePayload: Uint8Array | null = null;
+let payloadName = "";
 let generation = 0; // bumped on every restart; stale loops see it and die
 
-async function loadPayload(url: string): Promise<Uint8Array | null> {
-  const hit = payloadCache.get(url);
-  if (hit) return hit;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  payloadCache.set(url, bytes);
-  return bytes;
-}
-
 async function main() {
-  for (const el of [cfgPayload, cfgFps, cfgBytes, cfgEcc, cfgSize]) {
+  pickBtn.addEventListener("click", () => cfgFile.click());
+  cfgFile.addEventListener("change", async () => {
+    const file = cfgFile.files?.[0];
+    if (!file) return;
+    const gen = ++generation; // invalidate any running stream while we read
+    specs.textContent = `reading ${file.name}…`;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (gen !== generation) return; // superseded by another pick
+    filePayload = bytes;
+    payloadName = file.name;
+    pickBtn.textContent = "Change file";
+    void startStream();
+  });
+  for (const el of [cfgFps, cfgBytes, cfgEcc, cfgSize]) {
     el.addEventListener("change", () => void startStream());
   }
-  await startStream();
   try {
     await (navigator as Navigator & { wakeLock?: { request(t: "screen"): Promise<unknown> } })
       .wakeLock?.request("screen");
@@ -54,13 +58,9 @@ async function main() {
 }
 
 async function startStream() {
+  const payload = filePayload;
+  if (!payload) return; // nothing picked yet
   const gen = ++generation;
-  const payload = await loadPayload(cfgPayload.value);
-  if (!payload) {
-    specs.textContent = `✗ couldn't load ${cfgPayload.value}`;
-    return;
-  }
-  if (gen !== generation) return; // superseded while fetching
   const txFps = Number(cfgFps.value);
   const frameBytes = Number(cfgBytes.value);
   const ecc = cfgEcc.value as "L" | "M" | "Q" | "H";
@@ -111,7 +111,7 @@ async function startStream() {
       modules = qr.modules.size;
       sizeCanvas();
       specs.textContent =
-        `${txFps} FPS · ${frameBytes} bytes per frame · V${version} · ECC ${ecc} · ` +
+        `${payloadName} · ${txFps} FPS · ${frameBytes} bytes per frame · V${version} · ECC ${ecc} · ` +
         `${Math.round(payload.length / 1024)} KB payload · K=${encoder.k}`;
     }
     const size = qr.modules.size;
